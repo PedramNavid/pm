@@ -38,22 +38,17 @@ Then run: `source ~/.zshrc`
 ## Quick Start
 
 ```bash
-# Create a project
 uv run pm.py project create work
-
-# Add a task
 uv run pm.py add "Review pull requests" -p work -d "Check team PRs"
 
-# List tasks
 uv run pm.py ls
-
-# Update task status
 uv run pm.py task update 1 --status in-progress
 
-# Mark as done
+# Can use i/t/d as a short-hand for in-progress, todo, done.
+uv run pm.py task update 1 --status i
+
 uv run pm.py done 1
 
-# View task details
 uv run pm.py task show 1
 ```
 

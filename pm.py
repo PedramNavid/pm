@@ -49,6 +49,47 @@ def format_datetime(dt_str: str) -> str:
     except:
         return dt_str
 
+def format_relative_time(dt_str: str) -> str:
+    """Format datetime as relative time (e.g., '5 mins ago')."""
+    try:
+        # Parse the datetime string
+        dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+
+        # If dt is timezone-naive, treat it as UTC (SQLite CURRENT_TIMESTAMP is UTC)
+        if dt.tzinfo is None:
+            from datetime import timezone
+            dt = dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+        else:
+            now = datetime.now(dt.tzinfo)
+
+        diff = now - dt
+        seconds = diff.total_seconds()
+
+        # Handle negative times (shouldn't happen but just in case)
+        if seconds < 0:
+            return "just now"
+
+        if seconds < 60:
+            return f"{int(seconds)}s ago"
+        elif seconds < 3600:
+            mins = int(seconds / 60)
+            return f"{mins}m ago"
+        elif seconds < 86400:
+            hours = int(seconds / 3600)
+            return f"{hours}h ago"
+        elif seconds < 604800:
+            days = int(seconds / 86400)
+            return f"{days}d ago"
+        elif seconds < 2592000:  # ~30 days
+            weeks = int(seconds / 604800)
+            return f"{weeks}w ago"
+        else:
+            # For older dates, show the date
+            return dt.strftime('%Y-%m-%d')
+    except:
+        return dt_str
+
 @click.group()
 def cli():
     """Simple project management tool for tracking tasks."""
@@ -160,7 +201,7 @@ def task_list(project, status, all):
 
     table = Table(title="Tasks", show_header=True, header_style="bold magenta")
     table.add_column("ID", style="cyan", width=6)
-    table.add_column("Title", style="white")
+    table.add_column("Title", style="bold")
     table.add_column("Project", style="green")
     table.add_column("Status", width=12)
     table.add_column("Created", style="dim")
@@ -171,14 +212,15 @@ def task_list(project, status, all):
             t['title'],
             t['project_name'] or '-',
             format_status(t['status']),
-            format_datetime(t['created_at'])
+            format_relative_time(t['created_at'])
         )
 
     console.print(table)
 
 @task.command('show')
 @click.argument('task_id', type=int)
-def task_show(task_id):
+@click.option('--all', '-a', is_flag=True, help='Show all fields including timestamps')
+def task_show(task_id, all):
     """Show detailed information about a task."""
     task = db.get_task(task_id)
 
@@ -186,14 +228,38 @@ def task_show(task_id):
         console.print(f"[red]✗[/red] Task {task_id} not found.")
         return
 
-    content = f"""[bold]ID:[/bold] {task['id']}
-[bold]Title:[/bold] {task['title']}
-[bold]Project:[/bold] {task['project_name'] or '-'}
-[bold]Status:[/bold] {task['status']}
-[bold]Description:[/bold] {task['description'] or '-'}
-[bold]Created:[/bold] {format_datetime(task['created_at'])}
-[bold]Updated:[/bold] {format_datetime(task['updated_at'])}"""
+    # Get terminal width
+    terminal_width = console.width
 
+    # Calculate space for title (terminal width - ID - Status - spacing - margins - panel borders)
+    # Format: "ID: 123  Title...  [status]"
+    id_str = f"ID: {task['id']}"
+    # Approximate: ID (10 chars) + Status (15 chars) + spacing (6 chars) + panel borders (4) = 35 chars
+    available_for_title = terminal_width - 35
+
+    title = task['title']
+    if len(title) > available_for_title and available_for_title > 3:
+        title = title[:available_for_title - 3] + '...'
+
+    # Build content string
+    # First line: ID, Title, Status
+    content_lines = []
+    status_text = task['status']
+    content_lines.append(f"[bold cyan]{id_str}[/bold cyan]  {title}  [{format_status(status_text).style}]{status_text}[/{format_status(status_text).style}]")
+
+    # Project line
+    content_lines.append(f"[bold]Project:[/bold] {task['project_name'] or '-'}")
+
+    # Description
+    if task['description']:
+        content_lines.append(f"[bold]Description:[/bold] {task['description']}")
+
+    # Timestamps only with -a flag
+    if all:
+        content_lines.append(f"[bold]Created:[/bold] {format_datetime(task['created_at'])}")
+        content_lines.append(f"[bold]Updated:[/bold] {format_datetime(task['updated_at'])}")
+
+    content = "\n".join(content_lines)
     console.print(Panel(content, title=f"Task #{task_id}", border_style="blue"))
 
 @task.command('update')
